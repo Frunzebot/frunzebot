@@ -1,127 +1,91 @@
-import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    filters
-)
+from telegram import Update, InputMediaPhoto, InputMediaVideo
+from telegram.ext import ApplicationBuilder, MessageHandler, filters, CommandHandler, ContextTypes
 import os
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-
-user_states = {}
-
-# Старт / Меню
+# Відповідь на /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("Основний текст/фото/відео-допис", callback_data="main_post")],
-        [InlineKeyboardButton("Новини з посиланням (http)", callback_data="news_link")],
-        [InlineKeyboardButton("Анонімний внесок / інсайд", callback_data="anonymous_post")],
+        ["Основний текст/фото/відео-допис"],
+        ["Новини з посиланням (http)"],
+        ["Анонімний внесок / інсайд"]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Оберіть тип допису:", reply_markup=reply_markup)
+    reply_markup = {"keyboard": keyboard, "resize_keyboard": True}
+    await update.message.reply_text(
+        "Що вміє цей бот?\nЛаскаво просимо! Натисніть /start, щоб обрати тип допису.",
+        reply_markup=reply_markup
+    )
 
-# Вибір гілки
-async def handle_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    user_states[user_id] = {"branch": query.data, "content": None}
-    await query.edit_message_text("Надішліть текст / фото / відео або посилання.")
+# Основний постинг
+async def handle_text_photo_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
 
-# Отримання контенту
-async def handle_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    if user_id not in user_states:
-        await update.message.reply_text("Натисніть /start і виберіть тип допису.")
-        return
+    if message.text and "http" in message.text:
+        return await handle_link(update, context)
 
-    branch = user_states[user_id]["branch"]
-    content_type = None
-    content = None
+    content = []
+    if message.caption:
+        content.append(message.caption)
+    elif message.text:
+        content.append(message.text)
 
-    if update.message.text:
-        content_type = "text"
-        content = update.message.text
-    elif update.message.photo:
-        content_type = "photo"
-        content = update.message.photo[-1].file_id
-    elif update.message.video:
-        content_type = "video"
-        content = update.message.video.file_id
+    media = []
+    if message.photo:
+        media.append(InputMediaPhoto(media=message.photo[-1].file_id, caption="\n".join(content)))
+    elif message.video:
+        media.append(InputMediaVideo(media=message.video.file_id, caption="\n".join(content)))
+
+    if media:
+        await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media)
     else:
-        await update.message.reply_text("Формат не підтримується.")
-        return
+        await context.bot.send_message(chat_id=CHANNEL_ID, text="\n".join(content))
 
-    user_states[user_id]["content"] = {"type": content_type, "data": content}
+    await message.reply_text("Допис опубліковано.")
 
-    # Кнопки модерації
-    keyboard = [
-        [InlineKeyboardButton("✅ Опублікувати", callback_data="publish")],
-        [InlineKeyboardButton("✏️ Редагувати", callback_data="edit")],
-        [InlineKeyboardButton("❌ Відхилити", callback_data="cancel")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+# Новини з лінком
+async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    url = message.text.strip()
+    await context.bot.send_message(
+        chat_id=CHANNEL_ID,
+        text=f"жолудевий вкид:\n{url}"
+    )
+    await message.reply_text("Новину опубліковано.")
 
-    if content_type == "text":
-        await update.message.reply_text(f"Чернетка допису:\n\n{content}", reply_markup=reply_markup)
-    elif content_type == "photo":
-        await update.message.reply_photo(photo=content, caption="Чернетка допису (фото):", reply_markup=reply_markup)
-    elif content_type == "video":
-        await update.message.reply_video(video=content, caption="Чернетка допису (відео):", reply_markup=reply_markup)
+# Анонімні інсайди
+async def handle_anonymous(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    content = message.text or message.caption or "[Анонімне фото/відео]"
 
-# Кнопки: опублікувати / редагувати / відхилити
-async def moderation_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
+    media = []
+    if message.photo:
+        media.append(InputMediaPhoto(media=message.photo[-1].file_id, caption=content))
+    elif message.video:
+        media.append(InputMediaVideo(media=message.video.file_id, caption=content))
 
-    if user_id not in user_states or not user_states[user_id].get("content"):
-        await query.edit_message_text("Чернетка відсутня.")
-        return
+    if media:
+        await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media)
+    else:
+        await context.bot.send_message(chat_id=CHANNEL_ID, text=f"Анонімний внесок:\n{content}")
 
-    content = user_states[user_id]["content"]
-    action = query.data
+    await message.reply_text("Анонімне повідомлення надіслано адміну.")
 
-    if action == "cancel":
-        user_states.pop(user_id)
-        await query.edit_message_text("Скасовано.")
-        return
+# Розпізнавання типу
+async def router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text or update.message.caption or ""
 
-    if action == "edit":
-        await query.edit_message_text("Надішліть новий текст / фото / відео.")
-        return
+    if text.startswith("Новини з посиланням") or ("http" in text and len(text) < 300):
+        return await handle_link(update, context)
+    elif text.startswith("Анонімний внесок"):
+        return await handle_anonymous(update, context)
+    else:
+        return await handle_text_photo_video(update, context)
 
-    if action == "publish":
-        try:
-            if content["type"] == "text":
-                await context.bot.send_message(chat_id=CHANNEL_ID, text=content["data"])
-            elif content["type"] == "photo":
-                await context.bot.send_photo(chat_id=CHANNEL_ID, photo=content["data"])
-            elif content["type"] == "video":
-                await context.bot.send_video(chat_id=CHANNEL_ID, video=content["data"])
+app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-            await query.edit_message_text("✅ Допис опубліковано!")
-        except Exception as e:
-            await query.edit_message_text(f"Помилка публікації: {str(e)}")
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.ALL, router))
 
-        user_states.pop(user_id)
-
-# Запуск бота
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(handle_selection, pattern="^(main_post|news_link|anonymous_post)$"))
-    app.add_handler(CallbackQueryHandler(moderation_action, pattern="^(publish|edit|cancel)$"))
-    app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO, handle_content))
-
-    app.run_polling()
+app.run_polling()
