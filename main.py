@@ -1,19 +1,21 @@
 from pathlib import Path
 import shutil
 
-# Шлях до файлу
-file_path = Path("/mnt/data/main.py")
-
-# Код бота
-corrected_code = """import logging
+# Код для збереження
+code = """import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 
+# Установки логування
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# Список для збереження чернеток
 drafts = {}
+
+# Ваш Telegram ID
 ADMIN_ID = 6266425881
 
+# Хендлер для старту
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("Основний текст/фото/відео-допис", callback_data='main')],
@@ -21,14 +23,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Анонімний внесок / інсайд", callback_data='anon')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Що вміє цей бот?\nЛаскаво просимо! Натисніть /start, щоб обрати тип допису.", reply_markup=reply_markup)
+    await update.message.reply_text("Що вміє цей бот?\\nЛаскаво просимо! Натисніть /start, щоб обрати тип допису.", reply_markup=reply_markup)
 
+# Хендлер для вибору типу допису
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["type"] = query.data
     await query.edit_message_text(text="Надішліть текст / фото / відео або посилання.")
 
+# Хендлер для повідомлень
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_type = context.user_data.get("type")
     user = update.message.from_user
@@ -40,12 +44,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     drafts[user.id] = {"type": msg_type, "content": content}
 
+    # Повідомлення адміну
     buttons = [
         [InlineKeyboardButton("Опублікувати", callback_data=f"publish_{user.id}")],
         [InlineKeyboardButton("Відхилити", callback_data=f"reject_{user.id}")]
     ]
-    preview = f"<b>Попередній перегляд</b>\n\n"
-    preview += f"{content['text']}\n\n" if content['text'] else ""
+    preview = f"<b>Попередній перегляд</b>\\n\\n"
+    preview += f"{content['text']}\\n\\n" if content['text'] else ""
     if msg_type == "anon":
         signature = "жолудевий вкид анонімно"
     elif user.id == ADMIN_ID:
@@ -57,6 +62,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=ADMIN_ID, text=preview + formatted, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
     await update.message.reply_text("✅ Дякуємо! Ваш матеріал передано на модерацію.")
 
+# Хендлер на callback (публікація або відхилення)
 async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -71,7 +77,7 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_type = data["type"]
 
     if decision == "publish":
-        header = "адмін\n\n" if user_id == ADMIN_ID else "жолудевий вкид від комʼюніті\n\n"
+        header = "FrunzePro\\nадмін\\n\\n" if user_id == ADMIN_ID else "жолудевий вкид від комʼюніті\\n\\n"
         final_text = header + (content['text'] if content['text'] else "")
 
         if content["photo"]:
@@ -88,6 +94,7 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     del drafts[user_id]
     await query.edit_message_text("Рішення виконано.")
 
+# Основна функція запуску
 def main():
     from os import getenv
     BOT_TOKEN = getenv("BOT_TOKEN")
@@ -102,3 +109,11 @@ def main():
 
 if __name__ == "__main__":
     main()
+"""
+
+# Зберегти у файл
+file_path = Path("/mnt/data/main.py")
+file_path.write_text(code)
+
+# Підготовка до відправки
+shutil.copy(file_path, "/mnt/data/final_main.py")
