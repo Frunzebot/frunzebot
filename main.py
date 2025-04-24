@@ -1,150 +1,127 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 import os
 import logging
-from datetime import datetime, timedelta
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# Логування
+logging.basicConfig(level=logging.INFO)
+
+TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
-# Змінні для сесій
-user_sessions = {}
-moderation_messages = {}
-edit_windows = {}
+# Чернетки та статуси
+drafts = {}
+post_types = {}
 
-logging.basicConfig(level=logging.INFO)
+# Стартове меню
+def get_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Основний допис", callback_data="main_post")],
+        [InlineKeyboardButton("Новина з посиланням", callback_data="link_post")]
+    ])
 
 # /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("1. Основний допис", callback_data="main_post")],
-        [InlineKeyboardButton("2. Новина з посиланням", callback_data="link_post")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Оберіть тип допису:", reply_markup=reply_markup)
+    post_types[update.effective_user.id] = None
+    await update.message.reply_text("Оберіть тип допису:", reply_markup=get_menu())
 
-# Обробка вибору гілки
-async def handle_branch_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Обробка кнопок меню
+async def select_post_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    branch = query.data
-    user_sessions[query.from_user.id] = {"branch": branch}
-    await query.message.reply_text("Надішліть свій матеріал (текст, фото, відео або посилання).")
+    post_types[query.from_user.id] = query.data
+    await query.message.reply_text("Надішліть ваш матеріал або посилання.")
 
-# Головна обробка повідомлень
+# Основна логіка допису
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    session = user_sessions.get(user_id)
+    post_type = post_types.get(user_id)
 
-    if not session or "branch" not in session:
-        await update.message.reply_text("Спочатку оберіть тип допису через /start.")
+    if not post_type:
+        await update.message.reply_text("Будь ласка, спочатку оберіть тип допису через /start.")
         return
 
-    branch = session["branch"]
-    if branch == "main_post":
-        await handle_main_post(update, context)
-    elif branch == "link_post":
-        await handle_link_post(update, context)
+    # Гілка 1 — основний текст/фото/відео-допис
+    if post_type == "main_post":
+        content = {"text": update.message.text, "photo": None, "video": None}
+        if update.message.photo:
+            content["photo"] = update.message.photo[-1].file_id
+        if update.message.video:
+            content["video"] = update.message.video.file_id
+        drafts[user_id] = content
 
-# Гілка 1 — Основний текст/фото/відео-допис
-async def handle_main_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    content = {"text": update.message.text, "photo": update.message.photo, "video": update.message.video}
-    user_sessions[user_id]["content"] = content
-    keyboard = [
-        [InlineKeyboardButton("✅ Опублікувати", callback_data="publish_main")],
-        [InlineKeyboardButton("✏️ Редагувати", callback_data="edit_main")],
-        [InlineKeyboardButton("❌ Відхилити", callback_data="reject_main")]
-    ]
-    preview_text = "Попередній перегляд
+        text = update.message.text or ""
+        preview = "*Попередній перегляд*
+_адмін_
+" + text
 
-адмін"
-    await update.message.reply_text(preview_text, reply_markup=InlineKeyboardMarkup(keyboard))
-    moderation_messages[user_id] = update.message.message_id
+        buttons = [
+            [InlineKeyboardButton("✅ Опублікувати", callback_data="publish")],
+            [InlineKeyboardButton("✏️ Редагувати", callback_data="edit")],
+            [InlineKeyboardButton("❌ Відхилити", callback_data="reject")]
+        ]
+        await update.message.reply_text(preview, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
 
-# Обробка публікації гілки 1
-async def handle_main_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Гілка 2 — посилання
+    elif post_type == "link_post":
+        link = update.message.text
+        if not link.startswith("http"):
+            await update.message.reply_text("Це не схоже на посилання. Спробуйте ще раз.")
+            return
+        drafts[user_id] = {"link": link}
+        preview = "*Попередній перегляд новини*
+_адмін_
+[Читати новину](" + link + ")"
+        buttons = [
+            [InlineKeyboardButton("✅ Опублікувати", callback_data="publish")],
+            [InlineKeyboardButton("❌ Відхилити", callback_data="reject")]
+        ]
+        await update.message.reply_text(preview, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
+
+# Обробка кнопок після попереднього перегляду
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-    content = user_sessions.get(user_id, {}).get("content", {})
-    decision = query.data
+    data = query.data
+    content = drafts.get(user_id)
 
-    if decision == "publish_main":
-        text = content.get("text", "")
-        if content.get("photo"):
-            await context.bot.send_photo(chat_id=CHANNEL_ID, photo=content["photo"][-1].file_id, caption=f"адмін
+    if not content:
+        await query.message.reply_text("Чернетку не знайдено.")
+        return
 
-{text}")
-        elif content.get("video"):
-            await context.bot.send_video(chat_id=CHANNEL_ID, video=content["video"].file_id, caption=f"адмін
-
-{text}")
+    if data == "publish":
+        if "link" in content:
+            await context.bot.send_message(
+                chat_id=CHANNEL_ID,
+                text="адмін
+[Читати новину](" + content["link"] + ")",
+                parse_mode="Markdown"
+            )
         else:
-            await context.bot.send_message(chat_id=CHANNEL_ID, text=f"адмін
-
-{text}")
+            caption = f"адмін
+{content.get('text') or ''}"
+            if content.get("photo"):
+                await context.bot.send_photo(chat_id=CHANNEL_ID, photo=content["photo"], caption=caption)
+            elif content.get("video"):
+                await context.bot.send_video(chat_id=CHANNEL_ID, video=content["video"], caption=caption)
+            else:
+                await context.bot.send_message(chat_id=CHANNEL_ID, text=caption)
         await query.message.reply_text("✅ Опубліковано.")
-        user_sessions.pop(user_id, None)
+        drafts.pop(user_id)
 
-    elif decision == "reject_main":
-        await query.message.reply_text("❌ Матеріал відхилено.")
-        user_sessions.pop(user_id, None)
-
-    elif decision == "edit_main":
-        await query.message.reply_text("✏️ Надішліть нову версію. У вас є 20 хвилин.")
-        edit_windows[user_id] = datetime.now() + timedelta(minutes=20)
-
-# Гілка 2 — Новини з посиланням
-async def handle_link_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    link = update.message.text.strip()
-
-    if not link.startswith("http"):
-        await update.message.reply_text("Надішліть коректне посилання, яке починається з http або https.")
-        return
-
-    preview_text = f"Попередній перегляд новини
-
-адмін
-
-[{link}]({link})"
-    keyboard = [
-        [InlineKeyboardButton("✅ Опублікувати", callback_data="publish_link")],
-        [InlineKeyboardButton("❌ Відхилити", callback_data="reject_link")]
-    ]
-    await update.message.reply_text(preview_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    user_sessions[user_id]["link"] = link
-
-# Обробка рішення по новині
-async def handle_link_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    decision = query.data
-    link = user_sessions.get(user_id, {}).get("link")
-
-    if decision == "publish_link":
-        msg = f"адмін
-
-[Читати новину]({link})"
-        await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown", disable_web_page_preview=False)
-        await query.message.reply_text("✅ Посилання опубліковано.")
-        user_sessions.pop(user_id, None)
-
-    elif decision == "reject_link":
-        await query.message.reply_text("❌ Посилання відхилено.")
-        user_sessions.pop(user_id, None)
+    elif data == "edit":
+        await query.message.reply_text("✏️ Надішліть нову версію допису.")
+    elif data == "reject":
+        await query.message.reply_text("❌ Ваш матеріал не пройшов модерацію.")
+        drafts.pop(user_id)
 
 # Запуск бота
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(handle_branch_selection, pattern="^(main_post|link_post)$"))
-    app.add_handler(CallbackQueryHandler(handle_main_decision, pattern="^(publish_main|edit_main|reject_main)$"))
-    app.add_handler(CallbackQueryHandler(handle_link_decision, pattern="^(publish_link|reject_link)$"))
-    app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO, handle_message))
-    app.run_polling()
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(select_post_type, pattern="^(main_post|link_post)$"))
+app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO, handle_message))
+app.add_handler(CallbackQueryHandler(handle_callback, pattern="^(publish|edit|reject)$"))
 
 if __name__ == "__main__":
-    main()
+    app.run_polling()
