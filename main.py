@@ -21,14 +21,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Що вміє цей бот?\nЛаскаво просимо! Натисніть /start, щоб обрати тип допису.", reply_markup=reply_markup)
 
-# Хендлер для вибору типу допису
+# Вибір типу допису
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["type"] = query.data
     await query.edit_message_text(text="Надішліть текст / фото / відео або посилання.")
 
-# Хендлер для повідомлень
+# Обробка повідомлень
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_type = context.user_data.get("type")
     user = update.message.from_user
@@ -47,18 +47,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     preview = f"<b>Попередній перегляд</b>\n\n"
     preview += f"{content['text']}\n\n" if content['text'] else ""
+
     if msg_type == "anon":
         signature = "жолудевий вкид анонімно"
     elif user.id == ADMIN_ID:
         signature = "адмін"
     else:
         signature = "жолудевий вкид від комʼюніті"
-    formatted = f"{signature}"
 
+    formatted = f"{signature}"
     await context.bot.send_message(chat_id=ADMIN_ID, text=preview + formatted, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
     await update.message.reply_text("✅ Дякуємо! Ваш матеріал передано на модерацію.")
 
-# Хендлер на callback (публікація або відхилення)
+# Рішення (публікація чи відхилення)
 async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -90,7 +91,7 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     del drafts[user_id]
     await query.edit_message_text("Рішення виконано.")
 
-# Основна функція запуску
+# Запуск
 def main():
     from os import getenv
     BOT_TOKEN = getenv("BOT_TOKEN")
