@@ -11,20 +11,22 @@ CHANNEL_ID = "@frunze_pro"
 drafts = {}
 edit_windows = {}
 
-def generate_hard_masked_link_message(url: str, author: str, custom_text: str = "") -> str:
-    description = shorten(custom_text, width=140, placeholder="…") if custom_text else "читати більше тут"
-    masked_link = f"[{description}]({url})"
-    return f"{author}\n{masked_link}"
+def escape_markdown_v2(text: str) -> str:
+    for char in r"\_*[]()~`>#+-=|{}.!":
+        text = text.replace(char, f"\\{char}")
+    return text
+
+def generate_masked_link_markdown_v2(url: str, author: str, description: str) -> str:
+    description = shorten(description, width=140, placeholder="…")
+    masked_link = f"[{escape_markdown_v2(description)}]({escape_markdown_v2(url)})"
+    return f"{escape_markdown_v2(author)}\n{masked_link}"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("Основний текст/фото/відео-допис", callback_data='main')],
         [InlineKeyboardButton("Новини з посиланням (http)", callback_data='link')]
     ]
-    await update.message.reply_text(
-        "Оберіть тип допису для продовження:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    await update.message.reply_text("Оберіть тип допису для продовження:", reply_markup=InlineKeyboardMarkup(keyboard))
     context.user_data.clear()
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -36,7 +38,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "edit_mode": False,
         "edit_locked": False
     })
-    await query.edit_message_text("Надішліть один допис або посилання (в залежності від вибору).")
+    await query.edit_message_text("Надішліть один допис або посилання відповідно до обраної гілки.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
@@ -51,7 +53,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Ви вже надіслали. Натисніть ✏️ для редагування або дочекайтесь рішення.")
         return
 
-    # ГІЛКА 1 — текст/фото/відео
+    # ГІЛКА 1
     if msg_type == "main":
         text = update.message.caption_html or update.message.text_html or ""
         photo = update.message.photo[-1].file_id if update.message.photo else None
@@ -71,13 +73,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=ADMIN_ID, text=preview, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
         await update.message.reply_text("✅ Дякуємо! Ваш матеріал передано на модерацію.")
 
-    # ГІЛКА 2 — новини з посиланням
+    # ГІЛКА 2
     elif msg_type == "link":
-        text = update.message.text
-        if not text or ("http" not in text and "https" not in text):
-            await update.message.reply_text("Будь ласка, надішліть правильне посилання.")
+        if not update.message.text or "http" not in update.message.text:
+            await update.message.reply_text("Ця гілка приймає лише посилання з описом. Спробуйте ще раз.")
             return
 
+        text = update.message.text
         signature = "адмін" if user_id == ADMIN_ID else "жолудевий вкид від комʼюніті"
         preview = f"<b>Попередній перегляд новини</b>\n\n{text}\n\n<i>{signature}</i>"
 
@@ -90,9 +92,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await context.bot.send_message(chat_id=ADMIN_ID, text=preview, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
         await update.message.reply_text("✅ Посилання передано на модерацію.")
-
     else:
-        await update.message.reply_text("Цей формат не відповідає обраній гілці. Оберіть тип допису через /start.")
+        await update.message.reply_text("Цей формат не відповідає обраній гілці. Оберіть через /start.")
 
 async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -117,9 +118,9 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if action == "publish":
             if video:
-                await context.bot.send_video(chat_id=CHANNEL_ID, video=video, caption=caption if text else None, parse_mode="HTML")
+                await context.bot.send_video(chat_id=CHANNEL_ID, video=video, caption=caption, parse_mode="HTML")
             elif photo:
-                await context.bot.send_photo(chat_id=CHANNEL_ID, photo=photo, caption=caption if text else None, parse_mode="HTML")
+                await context.bot.send_photo(chat_id=CHANNEL_ID, photo=photo, caption=caption, parse_mode="HTML")
             else:
                 await context.bot.send_message(chat_id=CHANNEL_ID, text=caption, parse_mode="HTML")
             await context.bot.send_message(chat_id=user_id, text="✅ Ваш допис опубліковано.")
@@ -128,7 +129,7 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=user_id, text="❌ Ваш матеріал не пройшов модерацію.")
 
         elif action == "edit":
-            await context.bot.send_message(chat_id=user_id, text="✏️ Надішліть нову версію допису. У вас є 20 хвилин.")
+            await context.bot.send_message(chat_id=user_id, text="✏️ Надішліть нову версію. У вас є 20 хвилин.")
             context.user_data.update({
                 "type": "main",
                 "submitted": False,
@@ -143,10 +144,10 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
         url = text.strip().split()[0]
         description = text.replace(url, "").strip() or url
         signature = "адмін" if user_id == ADMIN_ID else "жолудевий вкид від комʼюніті"
-        formatted = generate_hard_masked_link_message(url, signature, description)
+        formatted = generate_masked_link_markdown_v2(url, signature, description)
 
         if action == "publish_link":
-            await context.bot.send_message(chat_id=CHANNEL_ID, text=formatted, parse_mode="Markdown", disable_web_page_preview=False)
+            await context.bot.send_message(chat_id=CHANNEL_ID, text=formatted, parse_mode="MarkdownV2", disable_web_page_preview=False)
             await context.bot.send_message(chat_id=user_id, text="✅ Ваше посилання опубліковано.")
         elif action == "reject_link":
             await context.bot.send_message(chat_id=user_id, text="❌ Ваше посилання не пройшло модерацію.")
