@@ -1,8 +1,4 @@
-from pathlib import Path
-import shutil
-
-# Код для збереження
-code = """import logging
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 
@@ -23,7 +19,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Анонімний внесок / інсайд", callback_data='anon')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Що вміє цей бот?\\nЛаскаво просимо! Натисніть /start, щоб обрати тип допису.", reply_markup=reply_markup)
+    await update.message.reply_text("Що вміє цей бот?\nЛаскаво просимо! Натисніть /start, щоб обрати тип допису.", reply_markup=reply_markup)
 
 # Хендлер для вибору типу допису
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -49,8 +45,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Опублікувати", callback_data=f"publish_{user.id}")],
         [InlineKeyboardButton("Відхилити", callback_data=f"reject_{user.id}")]
     ]
-    preview = f"<b>Попередній перегляд</b>\\n\\n"
-    preview += f"{content['text']}\\n\\n" if content['text'] else ""
+    preview = f"<b>Попередній перегляд</b>\n\n"
+    preview += f"{content['text']}\n\n" if content['text'] else ""
     if msg_type == "anon":
         signature = "жолудевий вкид анонімно"
     elif user.id == ADMIN_ID:
@@ -77,7 +73,7 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_type = data["type"]
 
     if decision == "publish":
-        header = "FrunzePro\\nадмін\\n\\n" if user_id == ADMIN_ID else "жолудевий вкид від комʼюніті\\n\\n"
+        header = "FrunzePro\nадмін\n\n" if user_id == ADMIN_ID else "жолудевий вкид від комʼюніті\n\n"
         final_text = header + (content['text'] if content['text'] else "")
 
         if content["photo"]:
@@ -109,11 +105,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-"""
-
-# Зберегти у файл
-file_path = Path("/mnt/data/main.py")
-file_path.write_text(code)
-
-# Підготовка до відправки
-shutil.copy(file_path, "/mnt/data/final_main.py")
