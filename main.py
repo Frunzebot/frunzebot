@@ -2,33 +2,33 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 
-# Установки логування
+# Логування
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Список для збереження чернеток
+# Чернетки
 drafts = {}
 
-# Ваш Telegram ID
+# ID адміна
 ADMIN_ID = 6266425881
 
-# Хендлер для старту
+# Старт
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("Основний текст/фото/відео-допис", callback_data='main')],
         [InlineKeyboardButton("Новини з посиланням (http)", callback_data='link')],
         [InlineKeyboardButton("Анонімний внесок / інсайд", callback_data='anon')],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Що вміє цей бот?\nЛаскаво просимо! Натисніть /start, щоб обрати тип допису.", reply_markup=reply_markup)
+    markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Що вміє цей бот?\nЛаскаво просимо! Натисніть /start, щоб обрати тип допису.", reply_markup=markup)
 
-# Вибір типу допису
+# Вибір типу
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["type"] = query.data
     await query.edit_message_text(text="Надішліть текст / фото / відео або посилання.")
 
-# Обробка повідомлень
+# Повідомлення
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_type = context.user_data.get("type")
     user = update.message.from_user
@@ -40,7 +40,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     drafts[user.id] = {"type": msg_type, "content": content}
 
-    # Повідомлення адміну
     buttons = [
         [InlineKeyboardButton("Опублікувати", callback_data=f"publish_{user.id}")],
         [InlineKeyboardButton("Відхилити", callback_data=f"reject_{user.id}")]
@@ -59,7 +58,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=ADMIN_ID, text=preview + formatted, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
     await update.message.reply_text("✅ Дякуємо! Ваш матеріал передано на модерацію.")
 
-# Рішення (публікація чи відхилення)
+# Публікація/відхилення
 async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -96,12 +95,10 @@ def main():
     from os import getenv
     BOT_TOKEN = getenv("BOT_TOKEN")
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button, pattern="^(main|link|anon)$"))
     app.add_handler(CallbackQueryHandler(decision, pattern="^(publish|reject)_"))
     app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO, handle_message))
-
     app.run_polling()
 
 if __name__ == "__main__":
