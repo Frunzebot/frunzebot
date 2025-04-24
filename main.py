@@ -102,10 +102,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-"""
-
-# Зберегти у файл
-file_path.write_text(corrected_code)
-
-# Підготувати до завантаження
-shutil.move(str(file_path), "/mnt/data/final_main.py")
