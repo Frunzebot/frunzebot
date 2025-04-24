@@ -1,3 +1,5 @@
+# ЗАВАНТАЖЕННЯ ВСЬОГО main.py ПОЧИНАЄТЬСЯ ТУТ
+
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
@@ -11,7 +13,7 @@ CHANNEL_ID = "@frunze_pro"
 drafts = {}
 edit_windows = {}
 
-def generate_masked_link_preview(text: str, url: str, author: str) -> str:
+def generate_masked_link_message(text: str, url: str, author: str) -> str:
     description = shorten(text, width=150, placeholder="…")
     masked_link = f"[{description}]({url})"
     return f"{author}\n{masked_link}"
@@ -53,7 +55,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     now = datetime.now()
 
-    # ГІЛКА 1
     if msg_type == "main":
         text = update.message.caption_html or update.message.text_html or ""
         photo = update.message.photo[-1].file_id if update.message.photo else None
@@ -73,7 +74,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=ADMIN_ID, text=preview, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
         await update.message.reply_text("✅ Дякуємо! Ваш матеріал передано на модерацію.")
 
-    # ГІЛКА 2
     elif msg_type == "link":
         text = update.message.text
         if not text or ("http" not in text and "https" not in text):
@@ -139,18 +139,17 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif post_type == "link":
         text = content["text"]
-        url = text.strip().split()[0]  # перше слово — лінк
+        url = text.strip().split()[0]
         description = text.replace(url, "").strip() or url
         signature = "адмін" if user_id == ADMIN_ID else "жолудевий вкид від комʼюніті"
-        formatted = generate_masked_link_preview(description, url, signature)
+        formatted = generate_masked_link_message(description, url, signature)
 
         if action == "publish_link":
-            await context.bot.send_message(chat_id=CHANNEL_ID, text=formatted, parse_mode="Markdown")
+            await context.bot.send_message(chat_id=CHANNEL_ID, text=formatted, parse_mode="Markdown", disable_web_page_preview=False)
             await context.bot.send_message(chat_id=user_id, text="✅ Ваше посилання опубліковано.")
         elif action == "reject_link":
             await context.bot.send_message(chat_id=user_id, text="❌ Ваше посилання не пройшло модерацію.")
 
-    # Очистка
     drafts.pop(user_id, None)
     edit_windows.pop(user_id, None)
     context.user_data.clear()
