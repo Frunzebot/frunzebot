@@ -39,14 +39,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     preview = f"<b>Попередній перегляд</b>\n\n"
     preview += f"{content['text']}\n\n" if content['text'] else ""
-
     if msg_type == "anon":
         signature = "жолудевий вкид анонімно"
     elif user.id == ADMIN_ID:
         signature = "адмін"
     else:
         signature = "жолудевий вкид від комʼюніті"
-
     formatted = f"{signature}"
 
     await context.bot.send_message(chat_id=ADMIN_ID, text=preview + formatted, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
