@@ -83,8 +83,7 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     del drafts[user_id]
     await query.edit_message_text("Рішення виконано.")
 
-def main():
-    from os import getenv
+def main():from os import getenv
     BOT_TOKEN = getenv("BOT_TOKEN")
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
