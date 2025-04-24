@@ -9,6 +9,7 @@ logging.basicConfig(level=logging.INFO)
 ADMIN_ID = 6266425881
 CHANNEL_ID = "@frunze_pro"
 drafts = {}
+draft_parts = {}
 edit_windows = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -44,9 +45,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     edit_mode = context.user_data.get("edit_mode", False)
     edit_locked = context.user_data.get("edit_locked", False)
 
-    # Затримка для уникнення Telegram-дублювань
-    await asyncio.sleep(0.5)
-
     if context.user_data.get("submitted", False):
         if edit_mode:
             if edit_locked:
@@ -62,21 +60,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Ви вже надіслали матеріал. Очікуйте рішення або натисніть ✏️ Редагувати.")
             return
 
-    # Формуємо контент з caption або тексту
+    # Отримуємо дані
     text = update.message.caption_html if update.message.caption else update.message.text_html if update.message.text else ""
     photo = update.message.photo[-1].file_id if update.message.photo else None
     video = update.message.video.file_id if update.message.video else None
 
-    content = {
-        "text": text,
-        "photo": photo,
-        "video": video,
-        "from_user": user_id,
-        "timestamp": now
-    }
+    # Створюємо або оновлюємо draft_parts
+    parts = draft_parts.get(user_id, {
+        "text": "",
+        "photo": None,
+        "video": None,
+        "last_update": now
+    })
 
-    drafts[user_id] = {"type": msg_type, "content": content}
-    context.user_data["submitted"] = True
+    if text:
+        parts["text"] = text
+    if photo:
+        parts["photo"] = photo
+    if video:
+        parts["video"] = video
+
+    parts["last_update"] = now
+    draft_parts[user_id] = parts
+
+    # Чекаємо 2 секунди і тоді перевіряємо
+    await asyncio.sleep(2)
+    if (datetime.now() - draft_parts[user_id]["last_update"]) >= timedelta(seconds=2):
+        await finalize_draft(user_id, context)
+
+async def finalize_draft(user_id, context):
+    content = draft_parts[user_id]
+    drafts[user_id] = {
+        "type": "main",
+        "content": content
+    }
 
     signature = "адмін" if user_id == ADMIN_ID else "жолудевий вкид від комʼюніті"
     preview = "<b>Попередній перегляд</b>\n\n"
@@ -91,7 +108,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     await context.bot.send_message(chat_id=ADMIN_ID, text=preview, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
-    await update.message.reply_text("✅ Дякуємо! Ваш матеріал передано на модерацію.")
+    await context.bot.send_message(chat_id=user_id, text="✅ Дякуємо! Ваш матеріал передано на модерацію.")
+    context.user_data["submitted"] = True
+    draft_parts.pop(user_id, None)
 
 async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -129,7 +148,6 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
         edit_windows[user_id] = datetime.now() + timedelta(minutes=20)
         return
 
-    # Очистка після рішення
     drafts.pop(user_id, None)
     edit_windows.pop(user_id, None)
     context.user_data["submitted"] = False
