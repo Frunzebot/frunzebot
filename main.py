@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 from datetime import datetime, timedelta
@@ -43,6 +44,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     edit_mode = context.user_data.get("edit_mode", False)
     edit_locked = context.user_data.get("edit_locked", False)
 
+    # Затримка для уникнення Telegram-дублювань
+    await asyncio.sleep(0.5)
+
     if context.user_data.get("submitted", False):
         if edit_mode:
             if edit_locked:
@@ -58,10 +62,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Ви вже надіслали матеріал. Очікуйте рішення або натисніть ✏️ Редагувати.")
             return
 
+    # Формуємо контент з caption або тексту
+    text = update.message.caption_html if update.message.caption else update.message.text_html if update.message.text else ""
+    photo = update.message.photo[-1].file_id if update.message.photo else None
+    video = update.message.video.file_id if update.message.video else None
+
     content = {
-        "text": update.message.text_html if update.message.text else "",
-        "photo": update.message.photo[-1].file_id if update.message.photo else None,
-        "video": update.message.video.file_id if update.message.video else None,
+        "text": text,
+        "photo": photo,
+        "video": video,
         "from_user": user_id,
         "timestamp": now
     }
