@@ -1,5 +1,3 @@
-# ЗАВАНТАЖЕННЯ ВСЬОГО main.py ПОЧИНАЄТЬСЯ ТУТ
-
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
@@ -13,8 +11,8 @@ CHANNEL_ID = "@frunze_pro"
 drafts = {}
 edit_windows = {}
 
-def generate_masked_link_message(text: str, url: str, author: str) -> str:
-    description = shorten(text, width=150, placeholder="…")
+def generate_hard_masked_link_message(url: str, author: str, custom_text: str = "") -> str:
+    description = shorten(custom_text, width=140, placeholder="…") if custom_text else "читати більше тут"
     masked_link = f"[{description}]({url})"
     return f"{author}\n{masked_link}"
 
@@ -142,7 +140,7 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
         url = text.strip().split()[0]
         description = text.replace(url, "").strip() or url
         signature = "адмін" if user_id == ADMIN_ID else "жолудевий вкид від комʼюніті"
-        formatted = generate_masked_link_message(description, url, signature)
+        formatted = generate_hard_masked_link_message(url, signature, description)
 
         if action == "publish_link":
             await context.bot.send_message(chat_id=CHANNEL_ID, text=formatted, parse_mode="Markdown", disable_web_page_preview=False)
