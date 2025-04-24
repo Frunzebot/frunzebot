@@ -26,6 +26,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["type"] = query.data
     context.user_data["submitted"] = False
     context.user_data["edit_mode"] = False
+    context.user_data["edit_locked"] = False
     await query.edit_message_text("Надішліть один допис (текст, фото, відео або все разом).")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -40,19 +41,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now()
     edit_deadline = edit_windows.get(user_id)
     edit_mode = context.user_data.get("edit_mode", False)
+    edit_locked = context.user_data.get("edit_locked", False)
 
     if context.user_data.get("submitted", False):
         if edit_mode:
+            if edit_locked:
+                await update.message.reply_text("Ви вже надіслали нову версію. Натисніть ✏️ ще раз, якщо хочете змінити ще раз.")
+                return
             if edit_deadline and now <= edit_deadline:
-                # приймаємо нове редагування
                 context.user_data["submitted"] = True
-                context.user_data["edit_mode"] = False
-                edit_windows.pop(user_id, None)
+                context.user_data["edit_locked"] = True
             else:
                 await update.message.reply_text("❌ Час редагування завершився. Створіть новий допис через /start.")
                 return
         else:
-            await update.message.reply_text("Ваше редагування вже прийнято. Якщо хочете змінити знову — натисніть ✏️ ще раз.")
+            await update.message.reply_text("Ви вже надіслали матеріал. Очікуйте рішення або натисніть ✏️ Редагувати.")
             return
 
     content = {
@@ -113,14 +116,16 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["type"] = "main"
         context.user_data["submitted"] = False
         context.user_data["edit_mode"] = True
+        context.user_data["edit_locked"] = False
         edit_windows[user_id] = datetime.now() + timedelta(minutes=20)
         return
 
-    # очищення
+    # Очистка після рішення
     drafts.pop(user_id, None)
     edit_windows.pop(user_id, None)
     context.user_data["submitted"] = False
     context.user_data["edit_mode"] = False
+    context.user_data["edit_locked"] = False
     await query.edit_message_text("✅ Рішення виконано.")
 
 def main():
