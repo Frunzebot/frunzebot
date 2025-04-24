@@ -1,6 +1,7 @@
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
+from datetime import datetime, timedelta
 
 logging.basicConfig(level=logging.INFO)
 
@@ -13,34 +14,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Основний текст/фото/відео-допис", callback_data='main')],
     ]
     await update.message.reply_text(
-        "Що вміє цей бот?\n\nОберіть тип допису для продовження:",
+        "Оберіть тип допису для продовження:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+    context.user_data.clear()
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    selection = query.data
-    context.user_data["type"] = selection
-
-    if selection == "main":
-        await query.edit_message_text("Ви обрали: Основний текст / фото / відео-допис.\n\nНадішліть ваш матеріал.")
+    context.user_data["type"] = query.data
+    context.user_data["submitted"] = False
+    await query.edit_message_text("Надішліть один допис (текст, фото, відео або все разом).")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_type = context.user_data.get("type")
+    already_sent = context.user_data.get("submitted", False)
     user = update.message.from_user
 
     if msg_type != "main":
         await update.message.reply_text("Будь ласка, спочатку оберіть тип допису через /start.")
         return
 
+    if already_sent:
+        await update.message.reply_text("Ви вже надіслали матеріал. Очікуйте рішення або натисніть ✏️ Редагувати.")
+        return
+
     content = {
         "text": update.message.text_html if update.message.text else "",
         "photo": update.message.photo[-1].file_id if update.message.photo else None,
         "video": update.message.video.file_id if update.message.video else None,
-        "from_user": user.id
+        "from_user": user.id,
+        "timestamp": datetime.now()
     }
+
     drafts[user.id] = {"type": msg_type, "content": content}
+    context.user_data["submitted"] = True
 
     signature = "адмін" if user.id == ADMIN_ID else "жолудевий вкид від комʼюніті"
     preview = "<b>Попередній перегляд</b>\n\n"
@@ -53,6 +61,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✏️ Редагувати", callback_data=f"edit_{user.id}")],
         [InlineKeyboardButton("❌ Відхилити", callback_data=f"reject_{user.id}")]
     ]
+
     await context.bot.send_message(chat_id=ADMIN_ID, text=preview, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
     await update.message.reply_text("✅ Дякуємо! Ваш матеріал передано на модерацію.")
 
@@ -80,11 +89,15 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=CHANNEL_ID, text=final_text, parse_mode="HTML")
 
         await context.bot.send_message(chat_id=user_id, text="✅ Ваш допис опубліковано.")
+
     elif action == "reject":
-        await context.bot.send_message(chat_id=user_id, text="❌ Ваш допис не пройшов модерацію.")
+        await context.bot.send_message(chat_id=user_id, text="❌ Ваш матеріал не пройшов модерацію. Ви можете надіслати нову версію.")
+
     elif action == "edit":
-        await context.bot.send_message(chat_id=user_id, text="✏️ Надішліть оновлену версію допису.")
+        await context.bot.send_message(chat_id=user_id, text="✏️ Ви можете надіслати нову версію допису. У вас є 20 хвилин.")
         context.user_data["type"] = "main"
+        context.user_data["submitted"] = False
+        context.user_data["edit_deadline"] = datetime.now() + timedelta(minutes=20)
         return
 
     del drafts[user_id]
