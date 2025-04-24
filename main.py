@@ -1,7 +1,3 @@
-import os
-from zipfile import ZipFile
-
-# Створимо структуру main.py (окремим файлом)
 code = """
 # main.py — Telegram-бот Frunzebot (усі 3 гілки інтегровані)
 # Версія: 2025.04.25
