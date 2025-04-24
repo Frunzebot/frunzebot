@@ -1,114 +1,124 @@
-import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+import os
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
-user_sessions = {}
+user_states = {}
+drafts = {}
 
-def build_main_keyboard():
-    keyboard = [
-        [InlineKeyboardButton("Основний допис", callback_data="main_post")],
-        [InlineKeyboardButton("Новина з посиланням", callback_data="link_post")],
-        [InlineKeyboardButton("Анонімний внесок", callback_data="anon_post")],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+def get_user_key(update: Update):
+    return update.effective_user.id
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Оберіть тип допису:", reply_markup=build_main_keyboard())
+    keyboard = [
+        [InlineKeyboardButton("Основний допис", callback_data='main_post')],
+        [InlineKeyboardButton("Новина з посиланням", callback_data='link_post')],
+    ]
+    await update.message.reply_text("Оберіть тип допису:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    chat_id = query.from_user.id
-    user_sessions[chat_id] = {"branch": query.data}
-    await query.message.reply_text("Надішліть ваш матеріал.")
+    user_id = query.from_user.id
+
+    if query.data == 'main_post':
+        user_states[user_id] = 'awaiting_main'
+        await query.edit_message_text("Надішліть ваш матеріал (текст, фото, відео або все разом).")
+
+    elif query.data == 'link_post':
+        user_states[user_id] = 'awaiting_link'
+        await query.edit_message_text("Надішліть посилання на новину.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in user_sessions:
-        await update.message.reply_text("Будь ласка, спочатку оберіть тип допису через /start.")
-        return
+    state = user_states.get(user_id)
 
-    branch = user_sessions[user_id]["branch"]
-    message = update.message
+    if state == 'awaiting_main':
+        draft_id = f"main_{user_id}"
+        drafts[draft_id] = update.message
+        keyboard = [
+            [InlineKeyboardButton("✅ Опублікувати", callback_data=f'publish_main_{user_id}')],
+            [InlineKeyboardButton("✏️ Редагувати", callback_data=f'edit_main_{user_id}')],
+            [InlineKeyboardButton("❌ Відхилити", callback_data=f'delete_main_{user_id}')]
+        ]
+        await context.bot.send_message(chat_id=user_id, text="Попередній перегляд\n\nадмін", reply_markup=InlineKeyboardMarkup(keyboard))
+        user_states[user_id] = 'waiting_main_confirm'
 
-    if branch == "main_post":
-        user_sessions[user_id]["content"] = message
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Опублікувати", callback_data="publish")],
-            [InlineKeyboardButton("✏️ Редагувати", callback_data="edit")],
-            [InlineKeyboardButton("❌ Відхилити", callback_data="reject")]
-        ])
-        await message.reply_text("Попередній перегляд\n\n*адмін*", parse_mode="Markdown", reply_markup=keyboard)
-
-    elif branch == "link_post":
-        if message.text and "http" in message.text:
-            user_sessions[user_id]["link"] = message.text
-            preview = "*Попередній перегляд новини*\n\n*адмін*"
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Опублікувати", callback_data="publish_link")],
-                [InlineKeyboardButton("❌ Відхилити", callback_data="reject_link")]
-            ])
-            await message.reply_text(preview, parse_mode="Markdown", reply_markup=keyboard)
+    elif state == 'awaiting_link':
+        if update.message.text and update.message.text.startswith("http"):
+            link = update.message.text
+            draft_id = f"link_{user_id}"
+            drafts[draft_id] = link
+            keyboard = [
+                [InlineKeyboardButton("✅ Опублікувати", callback_data=f'publish_link_{user_id}')],
+                [InlineKeyboardButton("❌ Відхилити", callback_data=f'delete_link_{user_id}')]
+            ]
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"Попередній перегляд новини\n\nадмін\n[{link.split('//')[1]}]({link})",
+                parse_mode='Markdown',
+                disable_web_page_preview=False,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            user_states[user_id] = 'waiting_link_confirm'
         else:
-            await message.reply_text("Будь ласка, надішліть коректне посилання.")
+            await update.message.reply_text("Це не схоже на посилання. Спробуйте знову.")
+
     else:
-        await message.reply_text("Цю гілку ще не реалізовано.")
+        await update.message.reply_text("Будь ласка, спочатку оберіть тип допису через /start.")
 
-async def handle_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-    session = user_sessions.get(user_id)
 
-    if not session:
-        await query.message.reply_text("Немає активної сесії.")
-        return
+    if query.data.startswith("publish_main_"):
+        msg = drafts.get(f"main_{user_id}")
+        if msg:
+            caption = msg.caption or msg.text or " "
+            if msg.video:
+                await context.bot.send_video(chat_id=CHANNEL_ID, video=msg.video.file_id, caption=f"адмін\n{caption}")
+            elif msg.photo:
+                await context.bot.send_photo(chat_id=CHANNEL_ID, photo=msg.photo[-1].file_id, caption=f"адмін\n{caption}")
+            else:
+                await context.bot.send_message(chat_id=CHANNEL_ID, text=f"адмін\n{caption}")
+            await query.edit_message_text("✅ Опубліковано.")
+            user_states[user_id] = None
+            drafts.pop(f"main_{user_id}", None)
 
-    branch = session["branch"]
+    elif query.data.startswith("delete_main_"):
+        await query.edit_message_text("❌ Відхилено.")
+        user_states[user_id] = None
+        drafts.pop(f"main_{user_id}", None)
 
-    if branch == "main_post":
-        content = session.get("content")
-        if content:
-            if content.text and content.photo:
-                await context.bot.send_photo(CHANNEL_ID, photo=content.photo[-1].file_id, caption=content.text + "\n\nадмін")
-            elif content.text and content.video:
-                await context.bot.send_video(CHANNEL_ID, video=content.video.file_id, caption=content.text + "\n\nадмін")
-            elif content.photo:
-                await context.bot.send_photo(CHANNEL_ID, photo=content.photo[-1].file_id, caption="адмін")
-            elif content.video:
-                await context.bot.send_video(CHANNEL_ID, video=content.video.file_id, caption="адмін")
-            elif content.text:
-                await context.bot.send_message(CHANNEL_ID, text=content.text + "\n\nадмін")
-            await query.message.reply_text("✅ Допис опубліковано.")
-        else:
-            await query.message.reply_text("Немає вмісту для публікації.")
-    elif branch == "link_post":
-        link = session.get("link")
+    elif query.data.startswith("edit_main_"):
+        user_states[user_id] = 'awaiting_main'
+        await query.edit_message_text("✏️ Надішліть нову версію допису.")
+
+    elif query.data.startswith("publish_link_"):
+        link = drafts.get(f"link_{user_id}")
         if link:
-            caption = "*адмін*\n[Читати новину](" + link + ")"
-            await context.bot.send_message(CHANNEL_ID, text=caption, parse_mode="Markdown", disable_web_page_preview=False)
-            await query.message.reply_text("✅ Посилання опубліковано.")
-        else:
-            await query.message.reply_text("Немає посилання для публікації.")
+            await context.bot.send_message(chat_id=CHANNEL_ID, text=f"адмін\n[читати новину]({link})", parse_mode='Markdown', disable_web_page_preview=False)
+            await query.edit_message_text("✅ Посилання опубліковано.")
+            user_states[user_id] = None
+            drafts.pop(f"link_{user_id}", None)
 
-async def handle_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    user_sessions.pop(user_id, None)
-    await query.message.reply_text("❌ Допис не пройшов модерацію.")
+    elif query.data.startswith("delete_link_"):
+        await query.edit_message_text("❌ Посилання відхилено.")
+        user_states[user_id] = None
+        drafts.pop(f"link_{user_id}", None)
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(handle_callback, pattern="^(main_post|link_post|anon_post)$"))
-    app.add_handler(CallbackQueryHandler(handle_publish, pattern="^(publish|publish_link)$"))
-    app.add_handler(CallbackQueryHandler(handle_reject, pattern="^(reject|reject_link)$"))
+    app.add_handler(CallbackQueryHandler(button_handler, pattern='^(main_post|link_post)$'))
+    app.add_handler(CallbackQueryHandler(callback_query_handler, pattern='^(publish_main_|delete_main_|edit_main_|publish_link_|delete_link_)'))
     app.add_handler(MessageHandler(filters.ALL, handle_message))
+
     app.run_polling()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
