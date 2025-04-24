@@ -1,68 +1,65 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 import os
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
-# Збереження чернетки
-draft_data = {}
+pending_messages = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("Основний допис", callback_data="main_post")],
-        [InlineKeyboardButton("Новина з посиланням", callback_data="link_post")],
-        [InlineKeyboardButton("Анонімний внесок", callback_data="anonymous_post")]
+        [InlineKeyboardButton("Основний допис", callback_data="main_post")]
     ]
     await update.message.reply_text("Оберіть тип допису:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    state = context.user_data.get("state")
-
-    if state == "main_post":
-        draft_data[user_id] = update.message
-        keyboard = [
-            [InlineKeyboardButton("✅ Опублікувати", callback_data="publish")],
-            [InlineKeyboardButton("✏️ Редагувати", callback_data="edit")],
-            [InlineKeyboardButton("❌ Відхилити", callback_data="reject")]
-        ]
-        await context.bot.send_message(chat_id=user_id, text="Попередній перегляд", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = query.from_user.id
-
     if query.data == "main_post":
-        context.user_data["state"] = "main_post"
-        await query.edit_message_text("Надішліть текст, фото або відео для публікації.")
-    elif query.data == "publish":
-        message = draft_data.get(user_id)
-        if message:
-            caption = message.caption or message.text or ""
-            if message.photo:
-                await context.bot.send_photo(chat_id=CHANNEL_ID, photo=message.photo[-1].file_id, caption=f"адмін\n\n{caption}")
-            elif message.video:
-                await context.bot.send_video(chat_id=CHANNEL_ID, video=message.video.file_id, caption=f"адмін\n\n{caption}")
-            else:
-                await context.bot.send_message(chat_id=CHANNEL_ID, text=f"адмін\n\n{caption}")
-            await query.edit_message_text("✅ Допис опубліковано.")
-        else:
-            await query.edit_message_text("❌ Чернетку не знайдено.")
-    elif query.data == "edit":
-        context.user_data["state"] = "main_post"
-        await query.edit_message_text("✏️ Надішліть нову версію допису.")
-    elif query.data == "reject":
-        draft_data.pop(user_id, None)
-        await query.edit_message_text("❌ Допис відхилено.")
+        context.user_data["post_type"] = "main"
+        await query.message.reply_text("Надішліть текст, фото або відео (можна все разом).")
 
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.ALL, handle_message))
-    app.add_handler(CallbackQueryHandler(handle_callback))
-    app.run_polling()
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    post_type = context.user_data.get("post_type")
+    if not post_type:
+        await update.message.reply_text("Будь ласка, оберіть тип допису через /start.")
+        return
 
-if __name__ == "__main__":
-    main()
+    user_id = update.effective_user.id
+    content = {"text": update.message.text, "photo": update.message.photo, "video": update.message.video}
+
+    pending_messages[user_id] = content
+    keyboard = [
+        [InlineKeyboardButton("✅ Опублікувати", callback_data="publish")],
+        [InlineKeyboardButton("✏️ Редагувати", callback_data="edit")],
+        [InlineKeyboardButton("❌ Відхилити", callback_data="reject")]
+    ]
+    await update.message.reply_text("Попередній перегляд", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def handle_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    content = pending_messages.get(user_id)
+
+    if content:
+        text = content.get("text", "")
+        caption = f"адмін\n\n{text}" if text else "адмін"
+
+        if content.get("photo"):
+            await context.bot.send_photo(CHANNEL_ID, photo=content["photo"][-1].file_id, caption=caption)
+        elif content.get("video"):
+            await context.bot.send_video(CHANNEL_ID, video=content["video"].file_id, caption=caption)
+        elif text:
+            await context.bot.send_message(CHANNEL_ID, text=caption)
+
+        del pending_messages[user_id]
+        await query.edit_message_text("✅ Допис опубліковано.")
+    else:
+        await query.edit_message_text("❌ Чернетку не знайдено.")
+
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(handle_callback, pattern="^(main_post|publish|edit|reject)$"))
+app.add_handler(MessageHandler(filters.ALL, handle_message))
