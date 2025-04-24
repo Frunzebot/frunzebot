@@ -1,4 +1,3 @@
-# Повторне збереження файлу та відправка через доступну функцію
 from pathlib import Path
 import shutil
 
