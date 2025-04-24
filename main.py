@@ -1,36 +1,26 @@
-code = """
-# main.py — Telegram-бот Frunzebot (усі 3 гілки інтегровані)
+# main.py — Telegram-бот Frunzebot (3 гілки)
 # Версія: 2025.04.25
-# Автор: GPT для Frunze
-
-import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    filters, CallbackQueryHandler, ContextTypes
-)
 
 import os
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID")  # Приклад: '@frunze_pro'
+import logging
+from telegram import (
+    Update, InlineKeyboardButton, InlineKeyboardMarkup,
+    InputMediaPhoto, InputMediaVideo
+)
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    CallbackQueryHandler, ContextTypes, filters
+)
 
 # Логування
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Стан
+# Глобальні словники для станів
 user_state = {}
 user_drafts = {}
 
-# Гілка вибору
-BRANCH = {
-    "TEXT": "branch_text",
-    "LINK": "branch_link",
-    "ANON": "branch_anon"
-}
-
-# /start
+# Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("1. Основний постинг", callback_data="text")],
@@ -46,7 +36,7 @@ async def branch_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_state[query.from_user.id] = query.data
     await query.edit_message_text("Надішліть свій допис:")
 
-# Обробка повідомлення
+# Обробка повідомлень
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     branch = user_state.get(uid)
@@ -59,21 +49,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1].file_id if update.message.photo else None
     video = update.message.video.file_id if update.message.video else None
     is_admin = str(uid) == os.getenv("ADMIN_ID")
-
+    
     if branch == "text":
         header = "адмін" if is_admin else "жолудевий вкид від комʼюніті"
+
     elif branch == "link":
         if not ("http://" in text or "https://" in text):
             await update.message.reply_text("Це не схоже на посилання. Надішліть валідний лінк.")
             return
         header = "адмін" if is_admin else "жолудевий вкид від комʼюніті"
+
     elif branch == "anon":
         header = "жолудевий вкид анонімно"
         await update.message.reply_text("✅ Дякуємо за інсайд. Ваш матеріал передано адміну.")
 
-    # Формуємо текст
-    message_text = f"*{header}*\n\n{text}" if branch != "anon" else f"*{header}*\n\n{text}"
-
+    message_text = f"*{header}*\n\n{text}"
     buttons = [
         [InlineKeyboardButton("✅ Опублікувати", callback_data="publish"),
          InlineKeyboardButton("✏️ Редагувати", callback_data="edit"),
@@ -107,13 +97,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "publish":
         if draft["photo"]:
-            await context.bot.send_photo(chat_id=CHANNEL_ID, photo=draft["photo"],
+            await context.bot.send_photo(chat_id=os.getenv("CHANNEL_ID"), photo=draft["photo"],
                                          caption=draft["text"], parse_mode="Markdown")
         elif draft["video"]:
-            await context.bot.send_video(chat_id=CHANNEL_ID, video=draft["video"],
+            await context.bot.send_video(chat_id=os.getenv("CHANNEL_ID"), video=draft["video"],
                                          caption=draft["text"], parse_mode="Markdown")
         else:
-            await context.bot.send_message(chat_id=CHANNEL_ID, text=draft["text"], parse_mode="Markdown")
+            await context.bot.send_message(chat_id=os.getenv("CHANNEL_ID"), text=draft["text"], parse_mode="Markdown")
 
         if draft["branch"] == "anon":
             await context.bot.send_message(chat_id=uid, text="✅ Дякуємо за інсайд. Ваш допис опубліковано.")
@@ -130,9 +120,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Відхилено.")
         user_drafts.pop(uid)
 
-# Головна
+# Головна функція
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(branch_select, pattern="^(text|link|anon)$"))
@@ -143,11 +133,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-"""
-
-# Зберегти у файл
-file_path = "/mnt/data/main.py"
-with open(file_path, "w") as f:
-    f.write(code)
-
-file_path
