@@ -51,8 +51,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Ви вже надіслали. Натисніть ✏️ для редагування або дочекайтесь рішення.")
         return
 
-    now = datetime.now()
-
+    # ГІЛКА 1 — текст/фото/відео
     if msg_type == "main":
         text = update.message.caption_html or update.message.text_html or ""
         photo = update.message.photo[-1].file_id if update.message.photo else None
@@ -72,6 +71,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=ADMIN_ID, text=preview, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
         await update.message.reply_text("✅ Дякуємо! Ваш матеріал передано на модерацію.")
 
+    # ГІЛКА 2 — новини з посиланням
     elif msg_type == "link":
         text = update.message.text
         if not text or ("http" not in text and "https" not in text):
@@ -90,6 +90,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await context.bot.send_message(chat_id=ADMIN_ID, text=preview, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
         await update.message.reply_text("✅ Посилання передано на модерацію.")
+
+    else:
+        await update.message.reply_text("Цей формат не відповідає обраній гілці. Оберіть тип допису через /start.")
 
 async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
