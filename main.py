@@ -57,9 +57,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     preview += f"<i>{signature}</i>"
 
     buttons = [
-        [InlineKeyboardButton("✅ Опублікувати", callback_data=f"publish_{user.id}")],
-        [InlineKeyboardButton("✏️ Редагувати", callback_data=f"edit_{user.id}")],
-        [InlineKeyboardButton("❌ Відхилити", callback_data=f"reject_{user.id}")]
+        [InlineKeyboardButton("✅ Опублікувати", callback_data=f"publish|{user.id}")],
+        [InlineKeyboardButton("✏️ Редагувати", callback_data=f"edit|{user.id}")],
+        [InlineKeyboardButton("❌ Відхилити", callback_data=f"reject|{user.id}")]
     ]
 
     await context.bot.send_message(chat_id=ADMIN_ID, text=preview, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
@@ -68,12 +68,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    action, user_id = query.data.split("_")
+    action, user_id = query.data.split("|")
     user_id = int(user_id)
 
     data = drafts.get(user_id)
     if not data:
-        await query.edit_message_text("Чернетку не знайдено.")
+        await query.edit_message_text("❌ Чернетку не знайдено.")
         return
 
     content = data["content"]
@@ -101,7 +101,7 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     del drafts[user_id]
-    await query.edit_message_text("Рішення виконано.")
+    await query.edit_message_text("✅ Рішення виконано.")
 
 def main():
     from os import getenv
@@ -109,7 +109,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button, pattern="^(main)$"))
-    app.add_handler(CallbackQueryHandler(decision, pattern="^(publish|reject|edit)_"))
+    app.add_handler(CallbackQueryHandler(decision, pattern="^(publish|reject|edit)\|"))
     app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO, handle_message))
 
     app.run_polling()
