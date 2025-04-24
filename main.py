@@ -1,163 +1,98 @@
-import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-user_states = {}
-preview_store = {}
+drafts = {}
+ADMIN_ID = 6266425881
 
-# Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("Основний текст/фото/відео-допис", callback_data="main_post")],
-        [InlineKeyboardButton("Новини з посиланням (http)", callback_data="news_link")],
-        [InlineKeyboardButton("Анонімний внесок / інсайд", callback_data="anon_post")]
+        [InlineKeyboardButton("Основний текст/фото/відео-допис", callback_data='main')],
+        [InlineKeyboardButton("Новини з посиланням (http)", callback_data='link')],
+        [InlineKeyboardButton("Анонімний внесок / інсайд", callback_data='anon')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Оберіть тип допису:", reply_markup=reply_markup)
+    await update.message.reply_text("Що вміє цей бот?\nЛаскаво просимо! Натисніть /start, щоб обрати тип допису.", reply_markup=reply_markup)
 
-# Обробка вибору гілки
-async def handle_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user_id = query.from_user.id
     await query.answer()
-    user_states[user_id] = query.data
-    await query.message.reply_text("Очікую контент (текст / фото / відео / посилання):")
+    context.user_data["type"] = query.data
+    await query.edit_message_text(text="Надішліть текст / фото / відео або посилання.")
 
-# Обробка вхідного контенту
-async def handle_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    state = user_states.get(user_id)
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg_type = context.user_data.get("type")
+    user = update.message.from_user
+    content = {
+        "text": update.message.text_html if update.message.text else "",
+        "photo": update.message.photo[-1].file_id if update.message.photo else None,
+        "video": update.message.video.file_id if update.message.video else None,
+        "from_user": user.id
+    }
+    drafts[user.id] = {"type": msg_type, "content": content}
 
-    text = update.message.text or update.message.caption or ""
-    photo = update.message.photo[-1].file_id if update.message.photo else None
-    video = update.message.video.file_id if update.message.video else None
+    buttons = [
+        [InlineKeyboardButton("Опублікувати", callback_data=f"publish_{user.id}")],
+        [InlineKeyboardButton("Відхилити", callback_data=f"reject_{user.id}")]
+    ]
+    preview = f"<b>Попередній перегляд</b>\n\n"
+    preview += f"{content['text']}\n\n" if content['text'] else ""
 
-    is_link = text.startswith("http://") or text.startswith("https://")
-
-    if state == "news_link" or (is_link and not state):
-        signature = "адмін" if user_id == ADMIN_ID else "жолудевий вкид від комʼюніті"
-        formatted = f"{signature}
-
-{text}"
-        preview_store[user_id] = {"type": "text", "content": formatted, "route": "news"}
-        keyboard = [
-            [InlineKeyboardButton("✅ Опублікувати", callback_data=f"publish_{user_id}_news")],
-            [InlineKeyboardButton("❌ Відхилити", callback_data=f"reject_{user_id}_news")]
-        ]
-        markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(chat_id=ADMIN_ID, text=f"Чернетка новини:
-
-{formatted}", reply_markup=markup)
-        return
-
-    if state == "anon_post":
-        await update.message.reply_text("✅ Дякуємо за інсайд. Ваш матеріал передано адміну.")
+    if msg_type == "anon":
         signature = "жолудевий вкид анонімно"
-        preview_store[user_id] = {
-            "type": "media" if photo or video else "text",
-            "text": text,
-            "photo": photo,
-            "video": video,
-            "route": "anon"
-        }
-        keyboard = [
-            [InlineKeyboardButton("✅ Опублікувати", callback_data=f"publish_{user_id}_anon")],
-            [InlineKeyboardButton("❌ Відхилити", callback_data=f"reject_{user_id}_anon")]
-        ]
-        markup = InlineKeyboardMarkup(keyboard)
-        if photo:
-            await context.bot.send_photo(chat_id=ADMIN_ID, photo=photo, caption=f"{signature}
+    elif user.id == ADMIN_ID:
+        signature = "адмін"
+    else:
+        signature = "жолудевий вкид від комʼюніті"
 
-{text}", reply_markup=markup)
-        elif video:
-            await context.bot.send_video(chat_id=ADMIN_ID, video=video, caption=f"{signature}
+    formatted = f"{signature}"
 
-{text}", reply_markup=markup)
-        else:
-            await context.bot.send_message(chat_id=ADMIN_ID, text=f"{signature}
+    await context.bot.send_message(chat_id=ADMIN_ID, text=preview + formatted, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+    await update.message.reply_text("✅ Дякуємо! Ваш матеріал передано на модерацію.")
 
-{text}", reply_markup=markup)
-        return
-
-    if state == "main_post":
-        signature = "адмін" if user_id == ADMIN_ID else "жолудевий вкид від комʼюніті"
-        preview_store[user_id] = {
-            "type": "media" if photo or video else "text",
-            "text": text,
-            "photo": photo,
-            "video": video,
-            "route": "main"
-        }
-        keyboard = [
-            [InlineKeyboardButton("✅ Опублікувати", callback_data=f"publish_{user_id}_main")],
-            [InlineKeyboardButton("✏️ Редагувати", callback_data=f"edit_{user_id}_main")],
-            [InlineKeyboardButton("❌ Відхилити", callback_data=f"reject_{user_id}_main")]
-        ]
-        markup = InlineKeyboardMarkup(keyboard)
-        preview = f"{signature}
-
-{text}"
-        if photo:
-            await update.message.reply_photo(photo=photo, caption=preview, reply_markup=markup)
-        elif video:
-            await update.message.reply_video(video=video, caption=preview, reply_markup=markup)
-        else:
-            await update.message.reply_text(preview, reply_markup=markup)
-        return
-
-# Обробка кнопок підтвердження
-async def handle_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    data = query.data.split("_")
-    action, uid, route = data[0], int(data[1]), data[2]
-    item = preview_store.get(uid)
-
-    if not item:
-        await query.edit_message_text("Чернетку втрачено.")
+    decision, user_id = query.data.split("_")
+    user_id = int(user_id)
+    data = drafts.get(user_id)
+    if not data:
+        await query.edit_message_text("Помилка: чернетку не знайдено.")
         return
 
-    if action == "publish":
-        if item["type"] == "text":
-            await context.bot.send_message(chat_id=CHANNEL_ID, text=item["content"] if "content" in item else f"{'жолудевий вкид анонімно' if route=='anon' else 'адмін'}
+    content = data["content"]
+    msg_type = data["type"]
 
-{item['text']}")
-        elif item["type"] == "media":
-            caption = f"{'жолудевий вкид анонімно' if route=='anon' else 'адмін'}
+    if decision == "publish":
+        header = "FrunzePro\nадмін\n\n" if user_id == ADMIN_ID else "жолудевий вкид від комʼюніті\n\n"
+        final_text = header + (content['text'] if content['text'] else "")
 
-{item['text']}"
-            if item["photo"]:
-                await context.bot.send_photo(chat_id=CHANNEL_ID, photo=item["photo"], caption=caption)
-            elif item["video"]:
-                await context.bot.send_video(chat_id=CHANNEL_ID, video=item["video"], caption=caption)
+        if content["photo"]:
+            await context.bot.send_photo(chat_id='@frunze_pro', photo=content["photo"], caption=final_text, parse_mode="HTML")
+        elif content["video"]:
+            await context.bot.send_video(chat_id='@frunze_pro', video=content["video"], caption=final_text, parse_mode="HTML")
+        else:
+            await context.bot.send_message(chat_id='@frunze_pro', text=final_text, parse_mode="HTML")
 
-        if route == "anon":
-            await context.bot.send_message(chat_id=uid, text="✅ Дякуємо за інсайд. Ваш допис опубліковано.")
+        await context.bot.send_message(chat_id=user_id, text="✅ Дякуємо за інсайд. Ваш допис опубліковано.")
+    else:
+        await context.bot.send_message(chat_id=user_id, text="❌ Дякуємо за матеріал, але ваш матеріал не пройшов модерацію.")
 
-        await query.edit_message_text("✅ Опубліковано.")
-        del preview_store[uid]
-
-    elif action == "reject":
-        if route == "anon":
-            await context.bot.send_message(chat_id=uid, text="❌ Дякуємо за матеріал, але ваш матеріал не пройшов модерацію.")
-        await query.edit_message_text("❌ Відхилено.")
-        if uid in preview_store:
-            del preview_store[uid]
-
-    elif action == "edit":
-        user_states[uid] = "main_post"
-        await context.bot.send_message(chat_id=uid, text="✏️ Надішліть новий текст або медіа.")
+    del drafts[user_id]
+    await query.edit_message_text("Рішення виконано.")
 
 def main():
+    from os import getenv
+    BOT_TOKEN = getenv("BOT_TOKEN")
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(handle_selection, pattern="^(main_post|news_link|anon_post)$"))
-    app.add_handler(CallbackQueryHandler(handle_decision, pattern="^(publish|reject|edit)_\d+_.*$"))
-    app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO, handle_content))
+    app.add_handler(CallbackQueryHandler(button, pattern="^(main|link|anon)$"))
+    app.add_handler(CallbackQueryHandler(decision, pattern="^(publish|reject)_"))
+    app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO, handle_message))
+
     app.run_polling()
 
 if __name__ == "__main__":
