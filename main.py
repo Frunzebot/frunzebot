@@ -1,4 +1,12 @@
-import logging
+# Повторне збереження файлу та відправка через доступну функцію
+from pathlib import Path
+import shutil
+
+# Шлях до файлу
+file_path = Path("/mnt/data/main.py")
+
+# Код бота
+corrected_code = """import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 
@@ -39,14 +47,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     preview = f"<b>Попередній перегляд</b>\n\n"
     preview += f"{content['text']}\n\n" if content['text'] else ""
-
     if msg_type == "anon":
         signature = "жолудевий вкид анонімно"
     elif user.id == ADMIN_ID:
         signature = "адмін"
     else:
         signature = "жолудевий вкид від комʼюніті"
-
     formatted = f"{signature}"
 
     await context.bot.send_message(chat_id=ADMIN_ID, text=preview + formatted, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
@@ -66,7 +72,7 @@ async def decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_type = data["type"]
 
     if decision == "publish":
-        header = "FrunzePro\nадмін\n\n" if user_id == ADMIN_ID else "жолудевий вкид від комʼюніті\n\n"
+        header = "адмін\n\n" if user_id == ADMIN_ID else "жолудевий вкид від комʼюніті\n\n"
         final_text = header + (content['text'] if content['text'] else "")
 
         if content["photo"]:
@@ -95,4 +101,12 @@ def main():
 
     app.run_polling()
 
-if __name__ == "__main__":main()
+if __name__ == "__main__":
+    main()
+"""
+
+# Зберегти у файл
+file_path.write_text(corrected_code)
+
+# Підготувати до завантаження
+shutil.move(str(file_path), "/mnt/data/final_main.py")
