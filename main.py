@@ -1,6 +1,3 @@
-# main.py — Telegram-бот Frunzebot (3 гілки)
-# Версія: 2025.04.25
-
 import os
 import logging
 from telegram import (
