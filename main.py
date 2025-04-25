@@ -18,7 +18,7 @@ async def handle_message(update: Update, context: CallbackContext):
     is_admin = user.id == ADMIN_ID
 
     sender_label = "адмін" if is_admin else "жолудевий вкид від комʼюніті"
-    caption = f"**{sender_label}**:\n{content}"
+    caption = f"{sender_label}:\n{content}"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Опублікувати", callback_data="approve"),
@@ -31,10 +31,9 @@ async def handle_message(update: Update, context: CallbackContext):
         chat_id=ADMIN_ID,
         text=caption,
         reply_markup=keyboard,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
-    # Записуємо ID юзера, який надіслав
     context.user_data["sender_id"] = user.id
     context.user_data["original_message"] = content
 
@@ -59,4 +58,4 @@ application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 application.add_handler(CallbackQueryHandler(handle_callback))
 
-application.run_polling() 
+application.run_polling()
