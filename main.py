@@ -11,14 +11,6 @@ application = ApplicationBuilder().token(BOT_TOKEN).build()
 async def start(update: Update, context: CallbackContext):
     await update.message.reply_text("Привіт! Обери тип допису:")
 
-# Тимчасовий хендлер для отримання chat_id каналу
-async def get_channel_id(update: Update, context: CallbackContext):
-    if update.message.forward_from_chat:
-        channel_id = update.message.forward_from_chat.id
-        await context.bot.send_message(chat_id=ADMIN_ID, text=f"Channel ID: {channel_id}")
-    else:
-        await context.bot.send_message(chat_id=ADMIN_ID, text="❌ Це не переслане повідомлення з каналу!")
-
 # Основна обробка повідомлень
 async def handle_message(update: Update, context: CallbackContext):
     user = update.message.from_user
@@ -53,8 +45,7 @@ async def handle_callback(update: Update, context: CallbackContext):
     original = context.user_data.get("original_message")
 
     if action == "approve":
-        # Замість @frunzepro — ПІСЛЯ цього кроку вставимо ID!
-        await context.bot.send_message(chat_id="@frunzepro", text=original)
+        await context.bot.send_message(chat_id=-1002093750924, text=original)  # chat_id з твоїх даних
         await context.bot.send_message(chat_id=sender_id, text="✅ Ваш допис опубліковано.")
     elif action == "reject":
         await context.bot.send_message(chat_id=sender_id, text="❌ Ваш допис не пройшов модерацію.")
@@ -63,7 +54,6 @@ async def handle_callback(update: Update, context: CallbackContext):
 
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-application.add_handler(MessageHandler(filters.FORWARDED, get_channel_id))  # додано для отримання channel_id
 application.add_handler(CallbackQueryHandler(handle_callback))
 
 application.run_polling()
