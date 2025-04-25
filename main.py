@@ -1,156 +1,157 @@
-import os
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    MessageHandler, ContextTypes, filters
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
+    InputMediaVideo
 )
+from telegram.ext import (
+    ApplicationBuilder,
+    ContextTypes,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters
+)
+
+TOKEN = 'YOUR_BOT_TOKEN'
+CHANNEL_ID = 'YOUR_CHANNEL_ID'
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-user_state = {}
+user_states = {}
 user_drafts = {}
-media_buffer = {}
 
-def escape(text):
-    return text.replace("-", "\\-").replace(".", "\\.")\
-               .replace("(", "\\(").replace(")", "\\)")\
-               .replace("!", "\\!").replace("=", "\\=")\
-               .replace("+", "\\+").replace("&", "\\&")\
-               .replace("~", "\\~").replace("|", "\\|")\
-               .replace("#", "\\#").replace(">", "\\>")\
-               .replace("<", "\\<").replace("[", "\\[")\
-               .replace("]", "\\]").replace("{", "\\{")\
-               .replace("}", "\\}")
-
+# ================== START ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_states[user_id] = 'awaiting_content'
+    await update.message.reply_text("Надішліть свій текст, фото або відео:")
+
+# ================== RECEIVE POST ==================
+async def receive_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    state = user_states.get(user_id)
+
+    if state != 'awaiting_content':
+        return
+
+    content = {'text': '', 'photos': [], 'videos': []}
+
+    if update.message.text:
+        content['text'] = update.message.text
+
+    if update.message.photo:
+        file_id = update.message.photo[-1].file_id
+        content['photos'].append(file_id)
+
+    if update.message.video:
+        file_id = update.message.video.file_id
+        content['videos'].append(file_id)
+
+    if update.message.caption:
+        content['text'] = update.message.caption
+
+    if not content['text'] and not content['photos'] and not content['videos']:
+        await update.message.reply_text("Будь ласка, надішліть текст, фото або відео.")
+        return
+
+    user_drafts[user_id] = content
+    user_states[user_id] = 'preview_ready'
+
+    await send_preview(update, context, user_id)
+
+# ================== SEND PREVIEW ==================
+async def send_preview(update, context, user_id):
+    content = user_drafts[user_id]
+    text = content['text']
+    photos = content['photos']
+    videos = content['videos']
+
+    username = update.effective_user.username
+    signature = "адмін" if username == "FrunzePro" else "жолудевий вкид від комʼюніті"
+    full_text = f"{signature}\n\n{text}" if text else signature
+
     keyboard = [
-        [InlineKeyboardButton("1. Основний постинг", callback_data="branch_text")]
-    ]
-    await update.message.reply_text("Оберіть тип допису:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def select_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_state[query.from_user.id] = query.data
-    await query.edit_message_text("Надішліть текст, фото або відео:")
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    branch = user_state.get(uid)
-
-    if branch != "branch_text":
-        return
-
-    if update.message.media_group_id:
-        if uid not in media_buffer:
-            media_buffer[uid] = []
-        if update.message.photo:
-            media_buffer[uid].append(("photo", update.message.photo[-1].file_id))
-        elif update.message.video:
-            media_buffer[uid].append(("video", update.message.video.file_id))
-        return
-
-    text = update.message.text or ""
-    photo = update.message.photo[-1].file_id if update.message.photo else None
-    video = update.message.video.file_id if update.message.video else None
-    is_admin = str(uid) == os.getenv("ADMIN_ID")
-    header = "адмін" if is_admin else "жолудевий вкид від комʼюніті"
-    final_text = f"*{header}*\n\n{escape(text)}"
-
-    user_drafts[uid] = {
-        "text": final_text,
-        "photo": photo,
-        "video": video,
-        "media": media_buffer.pop(uid, None)
-    }
-
-    buttons = [
-        [InlineKeyboardButton("✅ Опублікувати", callback_data="publish_text"),
-         InlineKeyboardButton("✏️ Редагувати", callback_data="edit_text"),
-         InlineKeyboardButton("❌ Відхилити", callback_data="reject_text")]
+        [
+            InlineKeyboardButton("✅ Опублікувати", callback_data="publish"),
+            InlineKeyboardButton("✏️ Редагувати", callback_data="edit"),
+            InlineKeyboardButton("❌ Відхилити", callback_data="reject")
+        ]
     ]
 
-    if user_drafts[uid]["media"]:
-        media_group = []
-        for media_type, file_id in user_drafts[uid]["media"]:
-            if media_type == "photo":
-                media_group.append(InputMediaPhoto(media=file_id))
-            elif media_type == "video":
-                media_group.append(InputMediaVideo(media=file_id))
-        await context.bot.send_media_group(chat_id=uid, media=media_group)
-        await context.bot.send_message(chat_id=uid, text=final_text,
-                                       reply_markup=InlineKeyboardMarkup(buttons),
-                                       parse_mode="MarkdownV2")
-    elif photo:
-        await context.bot.send_photo(chat_id=uid, photo=photo, caption=final_text,
-                                     reply_markup=InlineKeyboardMarkup(buttons),
-                                     parse_mode="MarkdownV2")
-    elif video:
-        await context.bot.send_video(chat_id=uid, video=video, caption=final_text,
-                                     reply_markup=InlineKeyboardMarkup(buttons),
-                                     parse_mode="MarkdownV2")
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if photos and not videos:
+        if len(photos) == 1:
+            await context.bot.send_photo(chat_id=user_id, photo=photos[0], caption=full_text, reply_markup=reply_markup)
+        else:
+            media = [InputMediaPhoto(media=p) for p in photos]
+            media[0].caption = full_text
+            await context.bot.send_media_group(chat_id=user_id, media=media)
+            await context.bot.send_message(chat_id=user_id, text="⤴️ Попередній перегляд", reply_markup=reply_markup)
+    elif videos:
+        await context.bot.send_video(chat_id=user_id, video=videos[0], caption=full_text, reply_markup=reply_markup)
     else:
-        await context.bot.send_message(chat_id=uid, text=final_text,
-                                       reply_markup=InlineKeyboardMarkup(buttons),
-                                       parse_mode="MarkdownV2")
+        await context.bot.send_message(chat_id=user_id, text=full_text, reply_markup=reply_markup)
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ================== BUTTON HANDLER ==================
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    uid = query.from_user.id
-    draft = user_drafts.get(uid)
 
-    if not draft:
-        await query.edit_message_text("Немає чернетки для публікації.")
+    user_id = query.from_user.id
+    data = query.data
+    content = user_drafts.get(user_id)
+
+    if not content:
+        await query.edit_message_text("Чернетка не знайдена.")
         return
 
-    if query.data == "publish_text":
-        try:
-            if draft.get("media"):
-                media_group = []
-                for media_type, file_id in draft["media"]:
-                    if media_type == "photo":
-                        media_group.append(InputMediaPhoto(media=file_id))
-                    elif media_type == "video":
-                        media_group.append(InputMediaVideo(media=file_id))
-                await context.bot.send_media_group(chat_id=os.getenv("CHANNEL_ID"), media=media_group)
-                await context.bot.send_message(chat_id=os.getenv("CHANNEL_ID"), text=draft["text"], parse_mode="MarkdownV2")
-            elif draft.get("photo"):
-                await context.bot.send_photo(chat_id=os.getenv("CHANNEL_ID"), photo=draft["photo"],
-                                             caption=draft["text"], parse_mode="MarkdownV2")
-            elif draft.get("video"):
-                await context.bot.send_video(chat_id=os.getenv("CHANNEL_ID"), video=draft["video"],
-                                             caption=draft["text"], parse_mode="MarkdownV2")
+    if data == "publish":
+        text = content['text']
+        photos = content['photos']
+        videos = content['videos']
+        username = query.from_user.username
+        signature = "адмін" if username == "FrunzePro" else "жолудевий вкид від комʼюніті"
+        full_text = f"{signature}\n\n{text}" if text else signature
+
+        if photos and not videos:
+            if len(photos) == 1:
+                await context.bot.send_photo(chat_id=CHANNEL_ID, photo=photos[0], caption=full_text)
             else:
-                await context.bot.send_message(chat_id=os.getenv("CHANNEL_ID"), text=draft["text"], parse_mode="MarkdownV2")
+                media = [InputMediaPhoto(media=p) for p in photos]
+                media[0].caption = full_text
+                await context.bot.send_media_group(chat_id=CHANNEL_ID, media=media)
+        elif videos:
+            await context.bot.send_video(chat_id=CHANNEL_ID, video=videos[0], caption=full_text)
+        else:
+            await context.bot.send_message(chat_id=CHANNEL_ID, text=full_text)
 
-            await context.bot.send_message(chat_id=uid, text="✅ Ваш допис опубліковано.")
-            await query.edit_message_text("Опубліковано.")
-            user_drafts.pop(uid)
+        await context.bot.send_message(chat_id=user_id, text="✅ Ваш допис опубліковано.")
+        user_drafts.pop(user_id, None)
+        user_states.pop(user_id, None)
 
-        except Exception as e:
-            logger.error(f"Publish error: {e}")
-            await query.edit_message_text("Помилка при публікації.")
+    elif data == "reject":
+        await context.bot.send_message(chat_id=user_id, text="❌ Ваш допис *не пройшов* модерацію.", parse_mode="Markdown")
+        user_drafts.pop(user_id, None)
+        user_states.pop(user_id, None)
 
-    elif query.data == "edit_text":
-        await query.edit_message_text("✏️ Надішліть нову версію допису.")
-        user_state[uid] = "branch_text"
-        user_drafts.pop(uid)
+    elif data == "edit":
+        user_states[user_id] = 'awaiting_content'
+        await context.bot.send_message(chat_id=user_id, text="Надішліть нову версію допису.")
 
-    elif query.data == "reject_text":
-        await context.bot.send_message(chat_id=uid, text="❌ Ваш матеріал не пройшов модерацію.")
-        await query.edit_message_text("Відхилено.")
-        user_drafts.pop(uid)
-
+# ================== MAIN ==================
 def main():
-    app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+    app = ApplicationBuilder().token(TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(select_branch, pattern="^branch_text$"))
-    app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO, handle_message))
-    app.add_handler(CallbackQueryHandler(handle_callback, pattern="^(publish_text|edit_text|reject_text)$"))
+    app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO, receive_post))
+    app.add_handler(CallbackQueryHandler(button_handler))
+
     app.run_polling()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
