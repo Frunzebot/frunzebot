@@ -59,4 +59,4 @@ application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 application.add_handler(CallbackQueryHandler(handle_callback))
 
-application.run_polling()
+application.run_polling() 
