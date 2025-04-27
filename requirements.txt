@@ -1,1 +1,3 @@
-python-telegram-bot==20.3
+python-telegram-bot[socks]==20.7
+tinydb==4.8.0
+python-dotenv==1.0.1
