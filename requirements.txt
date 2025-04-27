@@ -1,3 +1,5 @@
 python-telegram-bot[socks,job-queue]==20.7
 tinydb==4.8.0
 python-dotenv==1.0.1
+requests==2.31.0
+beautifulsoup4==4.12.3
