@@ -1,11 +1,17 @@
-# bot.py  –  FRUNZEBOT MVP ядро
-# python-telegram-bot v20+
+"""
+FRUNZEBOT MVP  — ядро першої фази
+* прийом контенту
+* вибір категорії
+* адмін-модерація: ✅ ✏️ ❌
+"""
 
 import logging
 import os
 from enum import Enum, auto
-from datetime import datetime, timedelta
+from datetime import datetime
+from pathlib import Path
 
+from dotenv import load_dotenv
 from tinydb import TinyDB, Query
 from telegram import (
     Update,
@@ -13,140 +19,177 @@ from telegram import (
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
+    WebAppInfo,
 )
 from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
-    CommandHandler,
-    MessageHandler,
     CallbackQueryHandler,
+    CommandHandler,
     ContextTypes,
+    MessageHandler,
     filters,
 )
 
-# ──────────── КОНФІГ ────────────
-BOT_TOKEN   = os.getenv("TELEGRAM_TOKEN") or "PUT_YOUR_TOKEN_HERE"
-ADMIN_ID    = int(os.getenv("ADMIN_ID")   or 6266425881)      # заміни своїм
-DB_PATH     = "frunze_drafts.json"
+# ──────────────── КОНФІГ ────────────────
+ENV_PATH = Path(".env")
+if ENV_PATH.exists():
+    load_dotenv(ENV_PATH)
 
-CATEGORIES = [
+BOT_TOKEN = os.getenv("TELEGRAM_TOKEN", "PUT_TOKEN_HERE")
+ADMIN_ID  = int(os.getenv("ADMIN_ID", 123456789))          # заміни своїм
+
+DB_PATH = "frunze_drafts.json"
+
+CATEGORIES = (
     "Інформаційна отрута",
     "Суспільні питання",
     "Я і моя філософія",
-]
+)
 
+
+# ──────────────── ДАНІ ────────────────
 class DraftStatus(Enum):
     PENDING   = auto()
     NEED_EDIT = auto()
     APPROVED  = auto()
     REJECTED  = auto()
 
-# ──────────── СХОВИЩЕ ────────────
-db = TinyDB(DB_PATH)
-Draft = Query()
 
-def save_draft(draft: dict):
-    db.upsert(draft, Draft.draft_id == draft["draft_id"])
+db     = TinyDB(DB_PATH)
+DraftQ = Query()
 
-def get_draft(draft_id: str) -> dict | None:
-    res = db.search(Draft.draft_id == draft_id)
+
+def save_draft(entry: dict):
+    db.upsert(entry, DraftQ.draft_id == entry["draft_id"])
+
+
+def get_draft(d_id: str) -> dict | None:
+    res = db.search(DraftQ.draft_id == d_id)
     return res[0] if res else None
 
-# ──────────── ХЕНДЛЕРИ ────────────
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+# ──────────────── ХЕНДЛЕРИ ────────────────
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = ReplyKeyboardMarkup(
-        [["Запропонувати пост"]],
-        resize_keyboard=True,
-        one_time_keyboard=True,
+        [["Запропонувати пост"]], resize_keyboard=True, one_time_keyboard=True
     )
     await update.message.reply_text(
-        "Тут формують, а не споживають.\n\nНадішли текст / фото / відео – "
-        "і обери категорію.", reply_markup=kb
+        "Тут формують, а не споживають.\n\nНадішли текст, фото або відео й обери категорію.",
+        reply_markup=kb,
     )
 
-async def incoming_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # зберігаємо чернетку у context до вибору категорії
+
+async def handle_payload(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Зберігаємо повідомлення у user_data → просимо обрати категорію.
+    """
     context.user_data["payload"] = update.message
-    kb = ReplyKeyboardMarkup(
+    cat_kb = ReplyKeyboardMarkup(
         [[c] for c in CATEGORIES], resize_keyboard=True, one_time_keyboard=True
     )
-    await update.message.reply_text("Обери категорію:", reply_markup=kb)
+    await update.message.reply_text("Оберіть категорію:", reply_markup=cat_kb)
+
 
 async def set_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text not in CATEGORIES:
-        return
-    payload = context.user_data.pop("payload", None)
-    if not payload:
-        return
+    """
+    Користувач натиснув одну з трьох категорій → формуємо чернетку й шлемо адмінам.
+    """
+    category = update.message.text
+    payload: Update | None = context.user_data.pop("payload", None)
+
+    if category not in CATEGORIES or payload is None:
+        return  # позбавляємось помилкових спрацювань
 
     draft_id = f"{payload.chat.id}_{payload.id}"
     draft = {
         "draft_id": draft_id,
         "user_id": payload.from_user.id,
         "status": DraftStatus.PENDING.name,
-        "category": update.message.text,
-        "date": datetime.now().isoformat(),
+        "category": category,
+        "date": datetime.utcnow().isoformat(),
     }
     save_draft(draft)
 
-    # надсилаємо адмінові чернетку
-    caption = f"<b>Категорія:</b> {draft['category']}\n<b>ID:</b> {draft_id}"
-    buttons = [
+    # ─── надсилаємо адмінові ───
+    caption = (
+        f"<b>Категорія:</b> {category}\n<b>ID:</b> <code>{draft_id}</code>"
+    )
+    btns = InlineKeyboardMarkup(
         [
-            InlineKeyboardButton("✅ Опублікувати", callback_data=f"approve:{draft_id}"),
-            InlineKeyboardButton("✏️ Потребує правок", callback_data=f"edit:{draft_id}"),
-            InlineKeyboardButton("❌ Відхилити",    callback_data=f"reject:{draft_id}"),
+            [
+                InlineKeyboardButton("✅", callback_data=f"approve:{draft_id}"),
+                InlineKeyboardButton("✏️", callback_data=f"edit:{draft_id}"),
+                InlineKeyboardButton("❌", callback_data=f"reject:{draft_id}"),
+            ]
         ]
-    ]
-    kb = InlineKeyboardMarkup(buttons)
-    await payload.copy(chat_id=ADMIN_ID, caption=caption, parse_mode=ParseMode.HTML, reply_markup=kb)
+    )
 
-    await payload.reply_text("Дякую! Чернетка передана модератору.", reply_markup=ReplyKeyboardRemove())
+    try:
+        await payload.copy(
+            chat_id=ADMIN_ID, caption=caption, reply_markup=btns, parse_mode=ParseMode.HTML
+        )
+    except Exception as err:
+        # fallback: надсилаємо тільки текст, якщо копіювати медіа не вдалося
+        logging.warning("Copy failed: %s", err)
+        await context.bot.send_message(
+            chat_id=ADMIN_ID, text=f"{caption}\n\n[Не вдалося скопіювати медіа]"
+        )
 
-# ──────────── АДМІН-КНОПКИ ────────────
-async def moderation_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await payload.reply_text(
+        "Дякую! Чернетка передана модератору.", reply_markup=ReplyKeyboardRemove()
+    )
+
+
+# ──────────────── МОДЕРАЦІЯ ────────────────
+async def cb_moderation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Адмін натискає ✅ ✏️ ❌
+    """
     if update.effective_user.id != ADMIN_ID:
-        await update.callback_query.answer("Не твоє питання 😉", show_alert=True)
+        await update.callback_query.answer("Недостатньо прав", show_alert=True)
         return
 
     action, draft_id = update.callback_query.data.split(":")
     draft = get_draft(draft_id)
     if not draft:
-        await update.callback_query.answer("Чернетка не знайдена", show_alert=True)
+        await update.callback_query.answer("Чернетку не знайдено", show_alert=True)
         return
 
-    # готуємо функції
-    async def notify_user(text):
+    async def ping_user(text: str):
         try:
-            await context.bot.send_message(chat_id=draft["user_id"], text=text)
+            await context.bot.send_message(draft["user_id"], text)
         except Exception as e:
-            logging.warning("Could not notify user: %s", e)
+            logging.warning("Notify fail: %s", e)
 
     if action == "approve":
         draft["status"] = DraftStatus.APPROVED.name
         save_draft(draft)
-        await notify_user("✅ Ваш допис схвалено й буде опубліковано.")
+        await ping_user("✅ Ваш допис схвалено й буде опубліковано.")
         await update.callback_query.edit_message_reply_markup(None)
 
     elif action == "reject":
         draft["status"] = DraftStatus.REJECTED.name
         save_draft(draft)
-        await notify_user("❌ Ваш допис не пройшов модерацію.")
+        await ping_user("❌ Ваш допис не пройшов модерацію.")
         await update.callback_query.edit_message_reply_markup(None)
 
     elif action == "edit":
         draft["status"] = DraftStatus.NEED_EDIT.name
         save_draft(draft)
-        context.user_data["pending_edit"] = draft_id
+        context.user_data["edit_draft"] = draft_id
         await update.callback_query.message.reply_text(
-            "Напиши коротко, що саме треба підправити:",
-            reply_markup=ReplyKeyboardRemove()
+            "Напишіть, що потрібно підправити:", reply_markup=ReplyKeyboardRemove()
         )
         await update.callback_query.answer()
 
-async def admin_edit_comment(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    draft_id = context.user_data.pop("pending_edit", None)
-    if not draft_id:
+
+async def admin_comment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Адмін надсилає пояснення для NEED_EDIT
+    """
+    draft_id = context.user_data.pop("edit_draft", None)
+    if not draft_id or update.effective_user.id != ADMIN_ID:
         return
 
     draft = get_draft(draft_id)
@@ -156,28 +199,44 @@ async def admin_edit_comment(update: Update, context: ContextTypes.DEFAULT_TYPE)
     comment = update.message.text
     await context.bot.send_message(
         chat_id=draft["user_id"],
-        text=f"✏️ Ваш допис потребує правок:\n\n{comment}\n\n"
-             "Будь ласка, надішліть оновлену версію у відповідь."
+        text=f"✏️ Ваш допис потребує правок:\n\n{comment}\n\nНадішліть нову версію у відповідь.",
     )
-    await update.message.reply_text("Коментар надіслано автору.")
+    await update.message.reply_text("Коментар відправлено автору.")
 
-# ──────────── МЕЙН ────────────
-def main():
-    logging.basicConfig(level=logging.INFO)
+
+# ──────────────── ЗБІРКА ────────────────
+def run():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)-8s | %(name)s: %(message)s",
+    )
     app = Application.builder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, set_category))
-    app.add_handler(MessageHandler(
-        (filters.PHOTO | filters.VIDEO | filters.Document.ALL | filters.TEXT) &
-        ~filters.Filter(lambda m: m.text in CATEGORIES),
-        incoming_content,
-    ))
-    app.add_handler(CallbackQueryHandler(moderation_callback))
-    app.add_handler(MessageHandler(filters.TEXT, admin_edit_comment))
+    # командний старт
+    app.add_handler(CommandHandler("start", cmd_start))
 
-    logging.info("Bot starting…")
-    app.run_polling()
+    # користувач спершу надсилає контент → payload
+    app.add_handler(
+        MessageHandler(
+            filters.ALL & ~filters.COMMAND & ~filters.Regex("|".join(CATEGORIES)),
+            handle_payload,
+        )
+    )
+
+    # далі — вибір категорії
+    app.add_handler(
+        MessageHandler(filters.Regex(f"^({'|'.join(CATEGORIES)})$"), set_category)
+    )
+
+    # кнопки модерації
+    app.add_handler(CallbackQueryHandler(cb_moderation))
+
+    # текст від адміна після ✏️
+    app.add_handler(MessageHandler(filters.TEXT & filters.User(ADMIN_ID), admin_comment))
+
+    logging.info("Bot started")
+    app.run_polling(stop_signals=None)  # Railway сам глушить процес
+
 
 if __name__ == "__main__":
-    main()
+    run()
